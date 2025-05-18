@@ -38,7 +38,6 @@ DEFAULT_GLOBAL_PARAMS = {
 }
 
 # --- CALCULATION FUNCTIONS ---
-# (calculate_machine_operational_costs and calculate_leasing_model_for_machine remain largely the same)
 def calculate_machine_operational_costs(machine_params, global_params):
     annual_capital_recovery = machine_params["machine_cost"] / machine_params["machine_lifespan_years"]
     annual_maintenance = machine_params["machine_cost"] * machine_params["annual_maintenance_cost_pct"]
@@ -69,14 +68,16 @@ def calculate_leasing_model_for_machine(machine_params, global_params):
 
 def calculate_contracting_model_per_villa(machine_daily_op_cost, global_params):
     results = {}
-    # 3DCP Shell Process Costs
-    machine_op_cost_for_project = machine_daily_op_cost * global_params["villa_printing_days_3dcp"]
+    # 3DCP Shell Process Costs (Machine part + materials for shell)
+    machine_op_cost_for_project_per_villa = machine_daily_op_cost * global_params["villa_printing_days_3dcp"]
+    results["machine_op_cost_for_project_per_villa"] = machine_op_cost_for_project_per_villa # Key for other functions if needed
+
     powder_cost_for_villa = global_params["powder_cost_per_ton"] * global_params["powder_tons_per_villa"]
     steel_cables_cost = global_params["steel_cables_cost_per_villa"]
-    total_3dcp_shell_process_cost = machine_op_cost_for_project + powder_cost_for_villa + steel_cables_cost
+    total_3dcp_shell_process_cost = machine_op_cost_for_project_per_villa + powder_cost_for_villa + steel_cables_cost
     results["total_3dcp_shell_process_cost_per_villa"] = total_3dcp_shell_process_cost
 
-    # Other Direct Villa Costs (3DCP)
+    # Other Direct Villa Costs (3DCP) - Foundation, Roofing, MEP, Finishes, Site Prep/Design
     other_direct_costs_3dcp = (
         global_params["cost_foundation_per_villa_3dcp"] +
         global_params["cost_roofing_per_villa_3dcp"] +
@@ -94,11 +95,11 @@ def calculate_contracting_model_per_villa(machine_daily_op_cost, global_params):
     return results
 
 def calculate_fleet_contracting_financials(num_machines, list_of_machine_params, global_params, contracting_villa_details):
-    results = {} # Renamed from productivity_and_turnover
+    results = {} 
     
     # --- Productivity ---
     villa_total_cycle_days_3dcp = global_params["villa_printing_days_3dcp"] + global_params["villa_additional_prep_finish_days_3dcp"]
-    if villa_total_cycle_days_3dcp == 0: villa_total_cycle_days_3dcp = 1
+    if villa_total_cycle_days_3dcp == 0: villa_total_cycle_days_3dcp = 1 # Avoid division by zero
     villas_per_year_per_active_3dcp_machine = global_params["operating_days_per_year"] / villa_total_cycle_days_3dcp
     total_villas_per_year_3dcp_fleet = villas_per_year_per_active_3dcp_machine * num_machines
     results["villa_total_cycle_days_3dcp"] = villa_total_cycle_days_3dcp
@@ -112,24 +113,20 @@ def calculate_fleet_contracting_financials(num_machines, list_of_machine_params,
     total_capital_invested_fleet = sum(mp["machine_cost"] for mp in list_of_machine_params)
     results["total_capital_invested_fleet"] = total_capital_invested_fleet
 
+    # Annual Fixed Operational Costs of the Fleet (Depreciation, Maintenance, Engineer Salaries for all machines)
     total_annual_fleet_machine_op_costs = sum(calculate_machine_operational_costs(mp, global_params)[0] for mp in list_of_machine_params)
-    
-    total_annual_3dcp_shell_process_costs_fleet = contracting_villa_details["total_3dcp_shell_process_cost_per_villa"] * total_villas_per_year_3dcp_fleet
-    # Correction: machine_op_costs are already annualized above. We need per-villa machine op costs for project-based costing.
-    # For fleet annual costs: Use annualized machine op costs.
-    # For total cost of goods sold (COGS): Use per-villa costs * number of villas.
-
-    total_annual_other_direct_costs_fleet = contracting_villa_details["other_direct_costs_per_villa_3dcp"] * total_villas_per_year_3dcp_fleet
-    
-    # Total Annual Cost for 3DCP Fleet Contracting
-    # This is the sum of annualized machine operating costs (which cover depreciation, maintenance, engineer)
-    # PLUS the variable costs for each villa produced (materials for shell, other direct costs like foundation, MEP etc.)
     
     # Variable costs per villa for shell (powder, steel)
     variable_shell_material_cost_per_villa = (global_params["powder_cost_per_ton"] * global_params["powder_tons_per_villa"] +
                                              global_params["steel_cables_cost_per_villa"])
     total_annual_variable_shell_material_costs_fleet = variable_shell_material_cost_per_villa * total_villas_per_year_3dcp_fleet
 
+    # Other direct variable costs per villa (foundation, roofing, MEP, finishes, site prep/design)
+    # These are already calculated per villa in contracting_villa_details dictionary
+    variable_other_direct_costs_per_villa = contracting_villa_details["other_direct_costs_per_villa_3dcp"]
+    total_annual_other_direct_costs_fleet = variable_other_direct_costs_per_villa * total_villas_per_year_3dcp_fleet
+    
+    # Total Annual Cost for 3DCP Fleet Contracting
     total_annual_cost_3dcp_fleet_contracting = (total_annual_fleet_machine_op_costs + # Fixed operational costs of machines
                                                 total_annual_variable_shell_material_costs_fleet + # Variable material for shell
                                                 total_annual_other_direct_costs_fleet) # Variable other direct costs
@@ -137,7 +134,8 @@ def calculate_fleet_contracting_financials(num_machines, list_of_machine_params,
     
     annual_profit_3dcp_fleet_contracting = annual_revenue_3dcp_fleet - total_annual_cost_3dcp_fleet_contracting
     results["annual_profit_3dcp_fleet_contracting"] = annual_profit_3dcp_fleet_contracting
-    results["profit_per_3dcp_villa_fleet_avg"] = contracting_villa_details.get("profit_per_3dcp_villa", 0)
+    # Profit per villa based on full cost allocation (including allocated machine op cost for project)
+    results["profit_per_3dcp_villa_fleet_avg"] = contracting_villa_details.get("profit_per_3dcp_villa", 0) 
     
     if total_capital_invested_fleet > 0:
         results["roi_3dcp_fleet_contracting"] = (annual_profit_3dcp_fleet_contracting / total_capital_invested_fleet) * 100
@@ -153,10 +151,10 @@ def calculate_fleet_contracting_financials(num_machines, list_of_machine_params,
     
     try:
         results["npv_3dcp_fleet"] = npf.npv(global_params["discount_rate_for_npv"], cash_flows)
-        results["irr_3dcp_fleet"] = npf.irr(cash_flows) * 100 if len(cash_flows) > 1 else 0
+        results["irr_3dcp_fleet"] = npf.irr(cash_flows) * 100 if len(cash_flows) > 1 and not (len(set(cash_flows[1:])) <= 1 and cash_flows[1] <= 0) else "N/A (Check Cash Flows)"
     except Exception as e: # Handles cases where IRR cannot be calculated
         results["npv_3dcp_fleet"] = "N/A"
-        results["irr_3dcp_fleet"] = "N/A (Error: " + str(e) + ")"
+        results["irr_3dcp_fleet"] = "N/A (Error)"
 
 
     # --- Traditional Model Comparison ---
@@ -179,54 +177,83 @@ def calculate_fleet_contracting_financials(num_machines, list_of_machine_params,
     results["cost_saving_per_villa_3dcp_vs_traditional"] = cost_saving_per_villa_3dcp
     results["time_saving_per_villa_3dcp_vs_traditional_days"] = time_saving_per_villa_3dcp_days
 
-    # Simplified Break-even (Villas for Contracting)
-    fixed_costs_fleet = total_annual_fleet_machine_op_costs # Annual machine costs
+    # CORRECTED Break-even (Villas for Contracting)
+    fixed_costs_fleet = total_annual_fleet_machine_op_costs # Annual machine operational costs (depreciation, maintenance, engineer)
+    
+    total_variable_costs_per_villa = variable_shell_material_cost_per_villa + variable_other_direct_costs_per_villa
+                                     
     contribution_margin_per_villa = (global_params["market_selling_price_per_villa"] -
-                                     (contracting_villa_details["total_3dcp_shell_process_cost_per_villa"] - contracting_villa_details["machine_op_cost_for_project_per_villa"]) - # Variable shell cost
-                                     contracting_villa_details["other_direct_costs_per_villa_3dcp"]) # Variable other costs
+                                     total_variable_costs_per_villa)
+                                     
     if contribution_margin_per_villa > 0:
         results["break_even_villas_fleet"] = fixed_costs_fleet / contribution_margin_per_villa
     else:
-        results["break_even_villas_fleet"] = "N/A (CM <= 0)"
+        results["break_even_villas_fleet"] = "N/A (CM <= 0)" # Contribution Margin is not positive
         
     return results
 
 # --- Helper for Scenario Management ---
 def get_all_inputs_as_dict(global_inputs, machine_inputs_list):
+    # Filter global_inputs to only include keys present in DEFAULT_GLOBAL_PARAMS
+    # This prevents trying to save internal Streamlit state keys
+    filtered_global_inputs = {k: global_inputs[k] for k in DEFAULT_GLOBAL_PARAMS.keys() if k in global_inputs}
     return {
-        "global_params": global_inputs,
-        "machine_params_list": machine_inputs_list
+        "global_params": filtered_global_inputs,
+        "machine_params_list": machine_inputs_list,
+        "num_machines": len(machine_inputs_list) # Also save number of machines
     }
 
-def load_inputs_from_dict(scenario_data, session_state_for_machines):
+def load_scenario_into_session_state(scenario_data):
     loaded_global = scenario_data.get("global_params", {})
-    loaded_machines = scenario_data.get("machine_params_list", [])
-    
-    # Update global params in session state or directly if not using session state for them
-    for key, value in loaded_global.items():
-        st.session_state[f"global_{key}"] = value # Assuming keys match session state keys
+    loaded_machines_list = scenario_data.get("machine_params_list", [])
+    loaded_num_machines = scenario_data.get("num_machines", 1)
 
-    # Update machine params
-    num_loaded_machines = len(loaded_machines)
-    st.session_state.num_machines = num_loaded_machines # Update the number_input for machines
-    
-    temp_machine_list = []
-    for i in range(num_loaded_machines):
-        machine_data = loaded_machines[i]
-        # Update session state keys for each machine input
-        st.session_state[f"m_cost_{i}"] = machine_data.get("machine_cost", DEFAULT_SINGLE_MACHINE_PARAMS["machine_cost"])
-        st.session_state[f"m_life_{i}"] = machine_data.get("machine_lifespan_years", DEFAULT_SINGLE_MACHINE_PARAMS["machine_lifespan_years"])
-        st.session_state[f"m_maint_{i}"] = machine_data.get("annual_maintenance_cost_pct", DEFAULT_SINGLE_MACHINE_PARAMS["annual_maintenance_cost_pct"])
-        st.session_state[f"m_eng_{i}"] = machine_data.get("engineer_monthly_salary", DEFAULT_SINGLE_MACHINE_PARAMS["engineer_monthly_salary"])
-        # Reconstruct the machine list for internal use if needed by session_state.machine_params_list
-        temp_machine_list.append({
-            "id": machine_data.get("id", i + 1),
-            "machine_cost": st.session_state[f"m_cost_{i}"],
-            "machine_lifespan_years": st.session_state[f"m_life_{i}"],
-            "annual_maintenance_cost_pct": st.session_state[f"m_maint_{i}"],
-            "engineer_monthly_salary": st.session_state[f"m_eng_{i}"],
-        })
-    session_state_for_machines.machine_params_list = temp_machine_list
+    # Update global param session state keys
+    for key, value in loaded_global.items():
+        session_key = f"global_{key}" # Construct the session key used in widgets
+        if session_key in st.session_state: # Check if the key exists to avoid errors
+             st.session_state[session_key] = value
+        # else:
+            # st.warning(f"Global session key not found during load: {session_key}")
+
+
+    # Update num_machines in session state (which drives the widget)
+    st.session_state.num_machines_widget = loaded_num_machines 
+    st.session_state.num_machines = loaded_num_machines # Also update the internal tracker
+
+    # Prepare to update machine_params_list in session state
+    new_machine_params_list = []
+    for i in range(loaded_num_machines):
+        if i < len(loaded_machines_list):
+            machine_data = loaded_machines_list[i]
+            # Create a new dict for the session state list, copying relevant fields
+            new_machine_data_for_ss = {
+                "id": machine_data.get("id", i + 1), # Ensure ID is present
+                "machine_cost": machine_data.get("machine_cost", DEFAULT_SINGLE_MACHINE_PARAMS["machine_cost"]),
+                "machine_lifespan_years": machine_data.get("machine_lifespan_years", DEFAULT_SINGLE_MACHINE_PARAMS["machine_lifespan_years"]),
+                "annual_maintenance_cost_pct": machine_data.get("annual_maintenance_cost_pct", DEFAULT_SINGLE_MACHINE_PARAMS["annual_maintenance_cost_pct"]),
+                "engineer_monthly_salary": machine_data.get("engineer_monthly_salary", DEFAULT_SINGLE_MACHINE_PARAMS["engineer_monthly_salary"]),
+            }
+            new_machine_params_list.append(new_machine_data_for_ss)
+            
+            # Also update individual session state keys for machine widgets
+            # This is what the widgets actually bind to for their values
+            st.session_state[f"m_cost_{i}"] = new_machine_data_for_ss["machine_cost"]
+            st.session_state[f"m_life_{i}"] = new_machine_data_for_ss["machine_lifespan_years"]
+            st.session_state[f"m_maint_{i}"] = new_machine_data_for_ss["annual_maintenance_cost_pct"]
+            st.session_state[f"m_eng_{i}"] = new_machine_data_for_ss["engineer_monthly_salary"]
+        else: # If loaded scenario has fewer machines than currently displayed, add defaults
+            default_m = DEFAULT_SINGLE_MACHINE_PARAMS.copy()
+            default_m["id"] = i + 1
+            new_machine_params_list.append(default_m)
+            # And update their session state keys too
+            st.session_state[f"m_cost_{i}"] = default_m["machine_cost"]
+            st.session_state[f"m_life_{i}"] = default_m["machine_lifespan_years"]
+            st.session_state[f"m_maint_{i}"] = default_m["annual_maintenance_cost_pct"]
+            st.session_state[f"m_eng_{i}"] = default_m["engineer_monthly_salary"]
+
+
+    st.session_state.machine_params_list = new_machine_params_list
 
 
 # --- Streamlit UI ---
@@ -234,7 +261,15 @@ st.set_page_config(layout="wide", page_title="Advanced 3DCP Business Simulator")
 st.title("🏗️ Advanced 3DCP Business Case & Financial Simulator")
 
 # Initialize session state for complex inputs if not already done
-if 'num_machines' not in st.session_state:
+# Ensure keys for global inputs match those used in widgets
+for key, value in DEFAULT_GLOBAL_PARAMS.items():
+    session_key = f"global_{key}"
+    if session_key not in st.session_state:
+        st.session_state[session_key] = value
+
+if 'num_machines_widget' not in st.session_state: # This key is used by the number_input for machines
+    st.session_state.num_machines_widget = 1
+if 'num_machines' not in st.session_state: # Internal tracker for number of machines
     st.session_state.num_machines = 1
 if 'machine_params_list' not in st.session_state:
     st.session_state.machine_params_list = [DEFAULT_SINGLE_MACHINE_PARAMS.copy()]
@@ -243,115 +278,171 @@ if 'machine_params_list' not in st.session_state:
 # --- Sidebar ---
 with st.sidebar:
     st.header("⚙️ Global Simulation Parameters")
-    global_params_input = {}
-    global_params_input["operating_days_per_year"] = st.number_input("Operating Days/Year", 100, 365, DEFAULT_GLOBAL_PARAMS["operating_days_per_year"], 5, key="global_operating_days_per_year", help="Total productive days available for machines annually.")
-    global_params_input["discount_rate_for_npv"] = st.slider("Discount Rate for NPV/IRR (%)", 0.01, 0.25, DEFAULT_GLOBAL_PARAMS["discount_rate_for_npv"], 0.01, format="%.2f", key="global_discount_rate_for_npv", help="Rate used to discount future cash flows for NPV calculation.")
+    # Use st.session_state for values of global inputs
+    # Example for one global input:
+    st.session_state.global_operating_days_per_year = st.number_input(
+        "Operating Days/Year", 100, 365, 
+        st.session_state.global_operating_days_per_year, 5, # Use session state value
+        key="widget_global_operating_days_per_year", # Unique widget key
+        help="Total productive days available for machines annually."
+    )
+    st.session_state.global_discount_rate_for_npv = st.slider(
+        "Discount Rate for NPV/IRR (%)", 0.01, 0.25, 
+        st.session_state.global_discount_rate_for_npv, 0.01, format="%.2f", 
+        key="widget_global_discount_rate_for_npv", 
+        help="Rate used to discount future cash flows for NPV calculation."
+    )
 
     st.subheader("Leasing Model Globals")
-    # ... (Leasing inputs as before with help tooltips) ...
-    global_params_input["lessor_target_profit_margin"] = st.slider("Lessor Target Profit Margin (%)", 0.01, 0.90, DEFAULT_GLOBAL_PARAMS["lessor_target_profit_margin"], 0.01, format="%.2f", key="global_lessor_target_profit_margin", help="Desired profit margin for the lessor on leasing operations.")
-    global_params_input["machine_utilization_leasing_days_per_machine"] = st.number_input("Machine Util. Days (Leasing)", 1, global_params_input["operating_days_per_year"], DEFAULT_GLOBAL_PARAMS["machine_utilization_leasing_days_per_machine"], 5, key="global_machine_utilization_leasing_days_per_machine", help="Expected number of days each machine will be leased out per year.")
-
+    st.session_state.global_lessor_target_profit_margin = st.slider("Lessor Target Profit Margin (%)", 0.01, 0.90, st.session_state.global_lessor_target_profit_margin, 0.01, format="%.2f", key="widget_global_lessor_target_profit_margin", help="Desired profit margin for the lessor on leasing operations.")
+    st.session_state.global_machine_utilization_leasing_days_per_machine = st.number_input("Machine Util. Days (Leasing)", 1, st.session_state.global_operating_days_per_year, st.session_state.global_machine_utilization_leasing_days_per_machine, 5, key="widget_global_machine_utilization_leasing_days_per_machine", help="Expected number of days each machine will be leased out per year.")
 
     st.subheader("Villa Construction & Material Globals (3DCP)")
-    # ... (Villa & Material inputs as before with help tooltips) ...
-    global_params_input["powder_cost_per_ton"] = st.number_input("Powder Cost/Ton (AED)", 100, value=DEFAULT_GLOBAL_PARAMS["powder_cost_per_ton"], step=10, key="global_powder_cost_per_ton", help="Cost of 1 ton of 3D printing powder.")
-    global_params_input["powder_tons_per_villa"] = st.number_input("Powder Tons/Villa", 10, value=DEFAULT_GLOBAL_PARAMS["powder_tons_per_villa"], step=5, key="global_powder_tons_per_villa", help="Amount of powder required for one villa.")
-    global_params_input["steel_cables_cost_per_villa"] = st.number_input("Steel/Cables Cost/Villa (AED)", 0, value=DEFAULT_GLOBAL_PARAMS["steel_cables_cost_per_villa"], step=1000, key="global_steel_cables_cost_per_villa", help="Cost of steel reinforcement and cables per villa.")
-    global_params_input["villa_printing_days_3dcp"] = st.number_input("Villa Printing Days (3DCP)", 5, value=DEFAULT_GLOBAL_PARAMS["villa_printing_days_3dcp"], step=1, key="global_villa_printing_days_3dcp", help="Number of days the 3D printer is actively printing for one villa.")
-    global_params_input["villa_additional_prep_finish_days_3dcp"] = st.number_input("Villa Additional Prep/Finish Days (3DCP)", 0, value=DEFAULT_GLOBAL_PARAMS["villa_additional_prep_finish_days_3dcp"], step=1, key="global_villa_additional_prep_finish_days_3dcp", help="Additional days for site prep, machine setup, and post-printing finishing related to one villa cycle.")
-    global_params_input["market_selling_price_per_villa"] = st.number_input("Market Selling Price/Villa (AED)", 500000, value=DEFAULT_GLOBAL_PARAMS["market_selling_price_per_villa"], step=50000, key="global_market_selling_price_per_villa", help="Expected selling price for a completed villa.")
+    st.session_state.global_powder_cost_per_ton = st.number_input("Powder Cost/Ton (AED)", 100, value=st.session_state.global_powder_cost_per_ton, step=10, key="widget_global_powder_cost_per_ton", help="Cost of 1 ton of 3D printing powder.")
+    st.session_state.global_powder_tons_per_villa = st.number_input("Powder Tons/Villa", 10, value=st.session_state.global_powder_tons_per_villa, step=5, key="widget_global_powder_tons_per_villa", help="Amount of powder required for one villa.")
+    st.session_state.global_steel_cables_cost_per_villa = st.number_input("Steel/Cables Cost/Villa (AED)", 0, value=st.session_state.global_steel_cables_cost_per_villa, step=1000, key="widget_global_steel_cables_cost_per_villa", help="Cost of steel reinforcement and cables per villa.")
+    st.session_state.global_villa_printing_days_3dcp = st.number_input("Villa Printing Days (3DCP)", 5, value=st.session_state.global_villa_printing_days_3dcp, step=1, key="widget_global_villa_printing_days_3dcp", help="Number of days the 3D printer is actively printing for one villa.")
+    st.session_state.global_villa_additional_prep_finish_days_3dcp = st.number_input("Villa Additional Prep/Finish Days (3DCP)", 0, value=st.session_state.global_villa_additional_prep_finish_days_3dcp, step=1, key="widget_global_villa_additional_prep_finish_days_3dcp", help="Additional days for site prep, machine setup, and post-printing finishing related to one villa cycle.")
+    st.session_state.global_market_selling_price_per_villa = st.number_input("Market Selling Price/Villa (AED)", 500000, value=st.session_state.global_market_selling_price_per_villa, step=50000, key="widget_global_market_selling_price_per_villa", help="Expected selling price for a completed villa.")
 
     st.subheader("Detailed 3DCP Villa Costs (Excl. 3DCP Shell Process)")
-    global_params_input["cost_foundation_per_villa_3dcp"] = st.number_input("Foundation Cost/Villa (AED)", 0, value=DEFAULT_GLOBAL_PARAMS["cost_foundation_per_villa_3dcp"], step=5000, key="global_cost_foundation_per_villa_3dcp")
-    global_params_input["cost_roofing_per_villa_3dcp"] = st.number_input("Roofing Cost/Villa (AED)", 0, value=DEFAULT_GLOBAL_PARAMS["cost_roofing_per_villa_3dcp"], step=5000, key="global_cost_roofing_per_villa_3dcp")
-    global_params_input["cost_mep_per_villa_3dcp"] = st.number_input("MEP Cost/Villa (AED)", 0, value=DEFAULT_GLOBAL_PARAMS["cost_mep_per_villa_3dcp"], step=5000, key="global_cost_mep_per_villa_3dcp")
-    global_params_input["cost_finishes_per_villa_3dcp"] = st.number_input("Finishes Cost/Villa (AED)", 0, value=DEFAULT_GLOBAL_PARAMS["cost_finishes_per_villa_3dcp"], step=5000, key="global_cost_finishes_per_villa_3dcp")
-    global_params_input["cost_site_prep_approvals_design_3dcp"] = st.number_input("Site Prep/Approvals/Design Cost/Villa (AED)", 0, value=DEFAULT_GLOBAL_PARAMS["cost_site_prep_approvals_design_3dcp"], step=5000, key="global_cost_site_prep_approvals_design_3dcp")
-
+    st.session_state.global_cost_foundation_per_villa_3dcp = st.number_input("Foundation Cost/Villa (AED)", 0, value=st.session_state.global_cost_foundation_per_villa_3dcp, step=5000, key="widget_global_cost_foundation_per_villa_3dcp")
+    st.session_state.global_cost_roofing_per_villa_3dcp = st.number_input("Roofing Cost/Villa (AED)", 0, value=st.session_state.global_cost_roofing_per_villa_3dcp, step=5000, key="widget_global_cost_roofing_per_villa_3dcp")
+    st.session_state.global_cost_mep_per_villa_3dcp = st.number_input("MEP Cost/Villa (AED)", 0, value=st.session_state.global_cost_mep_per_villa_3dcp, step=5000, key="widget_global_cost_mep_per_villa_3dcp")
+    st.session_state.global_cost_finishes_per_villa_3dcp = st.number_input("Finishes Cost/Villa (AED)", 0, value=st.session_state.global_cost_finishes_per_villa_3dcp, step=5000, key="widget_global_cost_finishes_per_villa_3dcp")
+    st.session_state.global_cost_site_prep_approvals_design_3dcp = st.number_input("Site Prep/Approvals/Design Cost/Villa (AED)", 0, value=st.session_state.global_cost_site_prep_approvals_design_3dcp, step=5000, key="widget_global_cost_site_prep_approvals_design_3dcp")
 
     st.subheader("Traditional Model Parameters (for Comparison)")
-    # ... (Traditional model inputs as before with help tooltips) ...
-    global_params_input["traditional_villa_build_months"] = st.number_input("Traditional Villa Build Time (Months)", 1, value=DEFAULT_GLOBAL_PARAMS["traditional_villa_build_months"], step=1, key="global_traditional_villa_build_months", help="Typical time to build a villa using traditional methods.")
-    global_params_input["traditional_villa_cost"] = st.number_input("Traditional Villa All-in Cost (AED)", 500000, value=DEFAULT_GLOBAL_PARAMS["traditional_villa_cost"], step=50000, key="global_traditional_villa_cost", help="Total cost to build a villa using traditional methods, for direct comparison.")
+    st.session_state.global_traditional_villa_build_months = st.number_input("Traditional Villa Build Time (Months)", 1, value=st.session_state.global_traditional_villa_build_months, step=1, key="widget_global_traditional_villa_build_months", help="Typical time to build a villa using traditional methods.")
+    st.session_state.global_traditional_villa_cost = st.number_input("Traditional Villa All-in Cost (AED)", 500000, value=st.session_state.global_traditional_villa_cost, step=50000, key="widget_global_traditional_villa_cost", help="Total cost to build a villa using traditional methods, for direct comparison.")
+    
+    # Reconstruct global_params_input from session state for calculations
+    global_params_input_for_calc = {k: st.session_state[f"global_{k}"] for k in DEFAULT_GLOBAL_PARAMS.keys()}
+
 
     st.subheader("Scenario Management")
-    # Use session state to store all inputs for saving
-    current_scenario_data_to_save = get_all_inputs_as_dict(global_params_input, st.session_state.machine_params_list)
+    # For saving, gather current values from session state (which widgets update)
+    current_global_inputs_for_save = {k: st.session_state[f"global_{k}"] for k in DEFAULT_GLOBAL_PARAMS.keys()}
+    
+    # For machine params, they are directly in st.session_state.machine_params_list
+    current_scenario_data_to_save = get_all_inputs_as_dict(current_global_inputs_for_save, st.session_state.machine_params_list)
+    
     st.download_button(
         label="📥 Save Current Scenario",
         data=json.dumps(current_scenario_data_to_save, indent=2),
         file_name="3dcp_scenario.json",
         mime="application/json"
     )
-    uploaded_file = st.file_uploader("📤 Load Scenario from JSON", type="json")
+    uploaded_file = st.file_uploader("📤 Load Scenario from JSON", type="json", key="scenario_uploader")
     if uploaded_file is not None:
         try:
             loaded_scenario_data = json.load(uploaded_file)
-            # This part is tricky: Need to update session state for all inputs to reflect loaded data
-            # For simplicity, we'll just log that it's loaded. A full load needs careful mapping.
-            # A proper implementation would iterate through loaded_scenario_data and update st.session_state items
-            # or re-run the input widgets with new default values.
-            # For now, we'll just display a message. A more robust load would require more code.
-            # load_inputs_from_dict(loaded_scenario_data, st.session_state) # Conceptual
-            st.success("Scenario file uploaded. Re-run widgets or refresh page to see changes if inputs are state-driven by default values.")
-            # For a real load, you'd need to iterate through the loaded_scenario_data
-            # and update the `value` parameter of each st.number_input/slider etc.
-            # This usually means re-rendering the page or using callbacks, which adds complexity.
-            # Or, structure inputs to pull defaults from st.session_state that you update upon load.
+            load_scenario_into_session_state(loaded_scenario_data)
+            st.success("Scenario loaded! Input fields updated. Re-run simulation if desired.")
+            # To prevent re-processing the same file on every interaction after upload:
+            st.session_state.scenario_uploader = None # Clear the uploader state
+            st.experimental_rerun() # Force a rerun to reflect new session state values in widgets
         except json.JSONDecodeError:
             st.error("Invalid JSON file.")
+        except Exception as e:
+            st.error(f"Error loading scenario: {e}")
 
 
 # --- Machine Configuration Area ---
 st.subheader("🛠️ Machine Fleet Configuration")
-num_machines_input = st.number_input("Number of 3DCP Machines", 1, 10, st.session_state.num_machines, 1, key="num_machines_widget", on_change=lambda: setattr(st.session_state, 'num_machines', st.session_state.num_machines_widget))
 
-# Adjust machine_params_list based on num_machines
+def update_num_machines_internal():
+    st.session_state.num_machines = st.session_state.num_machines_widget
+
+st.number_input(
+    "Number of 3DCP Machines", 1, 10, 
+    key="num_machines_widget", # Widget key
+    on_change=update_num_machines_internal # Update internal tracker on change
+)
+
+# Adjust machine_params_list based on st.session_state.num_machines (internal tracker)
 if len(st.session_state.machine_params_list) != st.session_state.num_machines:
     new_list = []
+    current_machine_list_backup = st.session_state.machine_params_list[:] # shallow copy for backup
     for i in range(st.session_state.num_machines):
-        if i < len(st.session_state.machine_params_list):
-            new_list.append(st.session_state.machine_params_list[i])
-        else:
-            new_machine = DEFAULT_SINGLE_MACHINE_PARAMS.copy()
-            new_machine["id"] = i + 1
-            new_list.append(new_machine)
+        if i < len(current_machine_list_backup):
+            new_list.append(current_machine_list_backup[i])
+        else: # Add new machine with defaults
+            new_machine_default = DEFAULT_SINGLE_MACHINE_PARAMS.copy()
+            new_machine_default["id"] = i + 1
+            new_list.append(new_machine_default)
     st.session_state.machine_params_list = new_list
 
 
-active_machine_params_list = []
+active_machine_params_list_for_calc = [] # This will hold the actual data for calculation
 for i in range(st.session_state.num_machines):
+    # Ensure the machine dict exists for this index
+    if i >= len(st.session_state.machine_params_list):
+        new_m_default = DEFAULT_SINGLE_MACHINE_PARAMS.copy()
+        new_m_default["id"] = i + 1
+        st.session_state.machine_params_list.append(new_m_default)
+
+    # Use unique keys for each machine's inputs by binding them to session state
+    # The st.session_state.machine_params_list will be the source of truth for display
+    # and also updated by the widgets if we assign their output back.
+    # However, direct assignment inside the loop can be tricky with Streamlit's reruns.
+    # It's often better to let widgets update their own session_state keys
+    # and then reconstruct active_machine_params_list_for_calc from those keys.
+
     with st.expander(f"Machine {st.session_state.machine_params_list[i]['id']} Parameters", expanded=(i==0)):
-        # ... (Machine inputs using st.session_state.machine_params_list[i] for values)
-        m_params = st.session_state.machine_params_list[i]
-        m_params["machine_cost"] = st.number_input(f"Cost (AED)##{i}", 100000, value=m_params["machine_cost"], step=50000, key=f"m_cost_{i}")
-        m_params["machine_lifespan_years"] = st.number_input(f"Lifespan (Years)##{i}", 1, value=m_params["machine_lifespan_years"], step=1, key=f"m_life_{i}")
-        m_params["annual_maintenance_cost_pct"] = st.slider(f"Maintenance (% Cost)##{i}", 0.01, 0.30, m_params["annual_maintenance_cost_pct"], 0.01, format="%.2f", key=f"m_maint_{i}")
-        m_params["engineer_monthly_salary"] = st.number_input(f"Engineer Salary (AED/month)##{i}", 0, value=m_params["engineer_monthly_salary"], step=500, key=f"m_eng_{i}")
-        active_machine_params_list.append(m_params) # Add the potentially modified dict
+        # These keys (`m_cost_i`, etc.) will be created in session_state by the widgets
+        # Initialize them if they don't exist from the machine_params_list
+        machine_obj = st.session_state.machine_params_list[i] # The dictionary for this machine
+
+        cost_key = f"m_cost_{i}"
+        life_key = f"m_life_{i}"
+        maint_key = f"m_maint_{i}"
+        eng_key = f"m_eng_{i}"
+
+        if cost_key not in st.session_state: st.session_state[cost_key] = machine_obj["machine_cost"]
+        if life_key not in st.session_state: st.session_state[life_key] = machine_obj["machine_lifespan_years"]
+        if maint_key not in st.session_state: st.session_state[maint_key] = machine_obj["annual_maintenance_cost_pct"]
+        if eng_key not in st.session_state: st.session_state[eng_key] = machine_obj["engineer_monthly_salary"]
+        
+        # Widgets read from and write to these specific session_state keys
+        st.session_state[cost_key] = st.number_input(f"Cost (AED)", 100000, value=st.session_state[cost_key], step=50000, key=cost_key)
+        st.session_state[life_key] = st.number_input(f"Lifespan (Years)", 1, value=st.session_state[life_key], step=1, key=life_key)
+        st.session_state[maint_key] = st.slider(f"Maintenance (% Cost)", 0.01, 0.30, st.session_state[maint_key], 0.01, format="%.2f", key=maint_key)
+        st.session_state[eng_key] = st.number_input(f"Engineer Salary (AED/month)", 0, value=st.session_state[eng_key], step=500, key=eng_key)
+
+        # Update the machine_params_list item with the new values from session_state keys
+        # This ensures st.session_state.machine_params_list stays synced with widget inputs for saving scenario
+        st.session_state.machine_params_list[i]["machine_cost"] = st.session_state[cost_key]
+        st.session_state.machine_params_list[i]["machine_lifespan_years"] = st.session_state[life_key]
+        st.session_state.machine_params_list[i]["annual_maintenance_cost_pct"] = st.session_state[maint_key]
+        st.session_state.machine_params_list[i]["engineer_monthly_salary"] = st.session_state[eng_key]
+
+        # Add to the list used for calculations
+        active_machine_params_list_for_calc.append(st.session_state.machine_params_list[i])
+
 
 # --- Simulation Execution and Dashboard Display ---
 if st.button("🚀 Run Simulation & Generate Dashboard", key="run_sim_button", type="primary"):
-    if not active_machine_params_list:
+    if not active_machine_params_list_for_calc: # Use the list populated from widget values
         st.error("Please configure at least one machine.")
     else:
-        avg_daily_op_cost_fleet = sum(calculate_machine_operational_costs(mp, global_params_input)[1] for mp in active_machine_params_list) / len(active_machine_params_list)
-        contracting_villa_details_output = calculate_contracting_model_per_villa(avg_daily_op_cost_fleet, global_params_input)
-        fleet_financials_output = calculate_fleet_contracting_financials(st.session_state.num_machines, active_machine_params_list, global_params_input, contracting_villa_details_output)
+        # Reconstruct global_params_input from current session state for calculations
+        current_global_params_for_calc = {k: st.session_state[f"global_{k}"] for k in DEFAULT_GLOBAL_PARAMS.keys()}
+
+        avg_daily_op_cost_fleet = sum(calculate_machine_operational_costs(mp, current_global_params_for_calc)[1] for mp in active_machine_params_list_for_calc) / len(active_machine_params_list_for_calc)
+        contracting_villa_details_output = calculate_contracting_model_per_villa(avg_daily_op_cost_fleet, current_global_params_for_calc)
+        fleet_financials_output = calculate_fleet_contracting_financials(st.session_state.num_machines, active_machine_params_list_for_calc, current_global_params_for_calc, contracting_villa_details_output)
 
         st.header("📊 Simulation Dashboard")
         st.subheader("📈 Key Financial Indicators (3DCP Fleet Contracting)")
         kpi_cols = st.columns(5)
         kpi_cols[0].metric("Annual Net Profit", f"AED {fleet_financials_output['annual_profit_3dcp_fleet_contracting']:,.0f}", help="Total revenue minus total costs for the fleet's contracting operations annually.")
-        kpi_cols[1].metric("Annual ROI", f"{fleet_financials_output['roi_3dcp_fleet_contracting']:.2f}%", help="Return on Investment: (Annual Profit / Total Capital Invested) * 100.")
-        kpi_cols[2].metric("NPV (Net Present Value)", f"AED {fleet_financials_output['npv_3dcp_fleet']:,.0f}" if isinstance(fleet_financials_output['npv_3dcp_fleet'], (int, float)) else fleet_financials_output['npv_3dcp_fleet'], help=f"Present value of future cash flows minus initial investment, discounted at {global_params_input['discount_rate_for_npv']*100:.0f}%.")
+        kpi_cols[1].metric("Annual ROI", f"{fleet_financials_output['roi_3dcp_fleet_contracting']:.2f}%" if isinstance(fleet_financials_output['roi_3dcp_fleet_contracting'], (int,float)) else "N/A", help="Return on Investment: (Annual Profit / Total Capital Invested) * 100.")
+        kpi_cols[2].metric("NPV (Net Present Value)", f"AED {fleet_financials_output['npv_3dcp_fleet']:,.0f}" if isinstance(fleet_financials_output['npv_3dcp_fleet'], (int, float)) else fleet_financials_output['npv_3dcp_fleet'], help=f"Present value of future cash flows minus initial investment, discounted at {current_global_params_for_calc['discount_rate_for_npv']*100:.0f}%.")
         kpi_cols[3].metric("IRR (Internal Rate of Return)", f"{fleet_financials_output['irr_3dcp_fleet']:.2f}%" if isinstance(fleet_financials_output['irr_3dcp_fleet'], (int, float)) else fleet_financials_output['irr_3dcp_fleet'], help="Discount rate at which the NPV of all cash flows equals zero. Higher is better.")
         kpi_cols[4].metric("Break-Even Villas/Year", f"{fleet_financials_output['break_even_villas_fleet']:.1f}" if isinstance(fleet_financials_output['break_even_villas_fleet'], (int, float)) else fleet_financials_output['break_even_villas_fleet'], help="Number of villas the fleet needs to build and sell annually to cover all fixed operational costs.")
 
-        # --- Charts ---
         st.subheader("💰 Financial Performance Comparison")
-        # ... (Financial charts from previous version, using fleet_financials_output) ...
         fin_cols = st.columns(2)
         profit_data = pd.DataFrame({
             'Model': ['3DCP Fleet Contracting', 'Traditional Equivalent Effort'],
@@ -365,15 +456,13 @@ if st.button("🚀 Run Simulation & Generate Dashboard", key="run_sim_button", t
 
         cost_comparison_data = pd.DataFrame({
             'Villa Type': ['3DCP Villa (Avg.)', 'Traditional Villa'],
-            'Total Cost per Villa (AED)': [contracting_villa_details_output['optimized_total_cost_per_3dcp_villa'], global_params_input['traditional_villa_cost']]
+            'Total Cost per Villa (AED)': [contracting_villa_details_output['optimized_total_cost_per_3dcp_villa'], current_global_params_for_calc['traditional_villa_cost']]
         })
         fig_cost_comp = px.bar(cost_comparison_data, x='Villa Type', y='Total Cost per Villa (AED)', title='Total Cost per Villa Comparison', color='Villa Type', text_auto=True)
         fig_cost_comp.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
         fin_cols[1].plotly_chart(fig_cost_comp, use_container_width=True)
 
-
         st.subheader("⏱️ Productivity & Efficiency")
-        # ... (Productivity charts from previous version, using fleet_financials_output) ...
         prod_cols = st.columns(2)
         villas_data = pd.DataFrame({
             'Production Method': [f"3DCP Fleet ({st.session_state.num_machines} machines)", f"Traditional Equivalent ({st.session_state.num_machines} teams)"],
@@ -392,24 +481,22 @@ if st.button("🚀 Run Simulation & Generate Dashboard", key="run_sim_button", t
         prod_cols[1].plotly_chart(fig_timeline, use_container_width=True)
         
         st.subheader("💸 Savings per Villa (3DCP vs. Traditional)")
-        # ... (Savings metrics from previous version, using fleet_financials_output) ...
         sav_cols = st.columns(2)
         sav_cols[0].metric("Cost Saving per Villa", f"AED {fleet_financials_output['cost_saving_per_villa_3dcp_vs_traditional']:,.0f}")
         sav_cols[1].metric("Time Saving per Villa", f"{fleet_financials_output['time_saving_per_villa_3dcp_vs_traditional_days']:.0f} Days")
 
         st.subheader("🔑 Leasing Model Insights (Representative - First Machine)")
-        # ... (Leasing insights as before) ...
-        if active_machine_params_list:
-            rep_machine_params_leasing = active_machine_params_list[0]
-            leasing_output_rep = calculate_leasing_model_for_machine(rep_machine_params_leasing, global_params_input)
+        if active_machine_params_list_for_calc: # Use the list used for calculation
+            rep_machine_params_leasing = active_machine_params_list_for_calc[0]
+            leasing_output_rep = calculate_leasing_model_for_machine(rep_machine_params_leasing, current_global_params_for_calc)
             st.markdown(f"**For Machine {rep_machine_params_leasing['id']}:**")
             lease_cols = st.columns(3)
             lease_cols[0].metric("Rec. Daily Lease Price", f"AED {leasing_output_rep['recommended_daily_lease_price_per_machine']:,.0f}")
-            lease_cols[1].metric(f"Annual Profit (Leasing, {global_params_input['machine_utilization_leasing_days_per_machine']} days util.)", f"AED {leasing_output_rep['annual_profit_lessor_per_machine_at_utilization']:,.0f}")
+            lease_cols[1].metric(f"Annual Profit (Leasing, {current_global_params_for_calc['machine_utilization_leasing_days_per_machine']} days util.)", f"AED {leasing_output_rep['annual_profit_lessor_per_machine_at_utilization']:,.0f}")
             lease_cols[2].metric("Contractor's 3DCP Cost/Villa (via leasing)", f"AED {leasing_output_rep['contractor_3dcp_elements_cost_per_villa_via_leasing']:,.0f}")
 
 else:
     st.info("Adjust parameters and click 'Run Simulation & Generate Dashboard'.")
 
 st.markdown("---")
-st.caption("Simulator v3.0: Includes NPV/IRR, detailed costs, break-even, and scenario save/load (basic). Review assumptions carefully.")
+st.caption("Simulator v3.1: Corrected Break-Even Logic. Review assumptions carefully.")
